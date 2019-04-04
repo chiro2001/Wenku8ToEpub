@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup as Soup
 from ebooklib import epub
+import os
 
 
 class Wenku8ToEpub:
@@ -12,11 +13,16 @@ class Wenku8ToEpub:
         self.api_img = "http://img.wkcdn.com/image/%s/%d/%ds.jpg"
         self.api_page = "https://www.wenku8.net/novel/0/1/2.htm"
 
-    def get_page(self, url_page: str):
-        pass
+    def get_page(self, url_page: str, title: str=''):
+        data = requests.get(url_page).content
+        soup = Soup(data, 'html.parser')
+        content = soup.select('#content')[0]
+        # 去除ul属性
+        [s.extract() for s in content("ul")]
+        return ("<h1>%s</h1>%s" % (title, content.prettify())).encode()
 
-    def get_book(self, id: int, savepath: str=''):
-        book = epub.EpubBook()
+    def get_book(self, id: int, savepath: str='books', fetch_image=True):
+        self.book = epub.EpubBook()
 
         url_cat = "%s%s" % (self.api % (("%04d" % id)[0], id), "index.htm")
         soup_cat = Soup(requests.get(url_cat).content, 'html.parser')
@@ -29,10 +35,20 @@ class Wenku8ToEpub:
         title = soup_cat.select("#title")[0].get_text()
         author = soup_cat.select("#info")[0].get_text().split('作者：')[-1]
         url_cover = self.api_img % (("%04d" % id)[0], id, id)
+        data_cover = requests.get(url_cover).content
         # print(title, author, url_cover)
-        book.set_identifier("%s, %s")
-        book.set_title(title)
-        book.add_author(author)
+        self.book.set_identifier("%s, %s")
+        self.book.set_title(title)
+        self.book.add_author(author)
+        self.book.set_cover('cover.jpg', data_cover)
+
+        # 用于章节排序的文件名
+        sumi = 0
+
+        # 目录管理
+        toc = []
+        # 主线
+        spine = ['cover', 'nav']
 
         targets = table.select('td')
         for t in targets:
@@ -43,19 +59,67 @@ class Wenku8ToEpub:
             if len(text) == 1:
                 continue
             if len(a) == 0:
-                print("Title:", t.get_text(), len(t.get_text()))
+                volume_text = t.get_text()
+                print('volume:', volume_text)
+                toc.append((epub.Section(volume_text), []))
+                volume = epub.EpubHtml(title=volume_text, file_name='%s.html' % sumi)
+                sumi = sumi + 1
+                volume.set_content(("<h1>%s</h1><br>" % volume_text).encode())
+                self.book.add_item(volume)
                 continue
             # 是单章
             a = a[0]
+
+            # 防止没有标题的情况出现
+            if len(toc) == 0:
+                toc.append((epub.Section(title), []))
             if a.get_text() == '插图':
                 print('Images:', a.get_text())
             else:
-                print('Page:', a.get_text())
+                print('chapter:', a.get_text())
+
+            title_page = a.get_text()
 
             url_page = "%s%s" % (self.api % (("%04d" % id)[0], id), a.get('href'))
-            print(url_page)
+            data_page = self.get_page(url_page, title=title_page)
+            page = epub.EpubHtml(title=title_page, file_name='%s.xhtml' % sumi)
+            sumi = sumi + 1
+
+            if fetch_image is True:
+                soup_tmp = Soup(data_page, 'html.parser')
+                imgcontent = soup_tmp.select(".imagecontent")
+                for img in imgcontent:
+                    url_img = img.get("src")
+                    print('Fetching image:', url_img, '... ', end='')
+                    data_img = requests.get(url_img).content
+                    filename = url_img.split('http://pic.wkcdn.com/pictures/')[-1]
+                    filetype = url_img.split('.')[-1]
+                    print('done. filename:', filename, "filetype", filetype)
+                    img = epub.EpubItem(file_name="images/%s" % filename, media_type="image/%s" % filetype, content=data_img)
+                    self.book.add_item(img)
+                    # spine.append(page)
+
+                data_page = (data_page.decode().replace('http://pic.wkcdn.com/pictures/', 'images/')).encode()
+
+            page.set_content(data_page)
+            self.book.add_item(page)
+
+            toc[-1][1].append(page)
+            spine.append(page)
+
+        self.book.toc = toc
+
+        # add navigation files
+        self.book.add_item(epub.EpubNcx())
+        self.book.add_item(epub.EpubNav())
+
+        # create spine
+        self.book.spine = spine
+
+        epub.write_epub(os.path.join(savepath, '%s - %s.epub' % (title, author)), self.book)
 
 
 if __name__ == '__main__':
     wk = Wenku8ToEpub()
-    wk.get_book(1)
+    wk.get_book(2019)
+
