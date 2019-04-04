@@ -156,11 +156,11 @@ if __name__ == '__main__':
     fetch_image = True
     if len(args) == 0:
         print(help_str)
-        exit()
+        quit(0)
     for name, val in opts:
         if '-h' == name:
             print(help_str)
-            exit()
+            quit(0)
         if '-t' == name:
             fetch_image = False
 
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     except Exception as e:
         print("错误: 参数只接受数字。")
         print(help_str)
-        exit()
+        quit(0)
 
     for _id in args:
         wk = Wenku8ToEpub()
