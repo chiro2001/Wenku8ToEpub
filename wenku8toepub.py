@@ -29,6 +29,23 @@ class Wenku8ToEpub:
         self.chapters = []
         self.book_id = 0
 
+    def id2name(self, book_id: int):
+        url_cat = "%s%s" % (self.api % (("%04d" % book_id)[0], book_id), "index.htm")
+        soup_cat = Soup(requests.get(url_cat).content, 'html.parser')
+        table = soup_cat.select('table')
+        if len(table) == 0:
+            logger.error("遇到错误")
+            return ''
+        table = table[0]
+
+        if len(soup_cat.select("#title")) == 0:
+            logger.error('该小说不存在！id = ' + str(book_id))
+            return ''
+        title = soup_cat.select("#title")[0].get_text()
+        # author = soup_cat.select("#info")[0].get_text().split('作者：')[-1]
+        # url_cover = self.api_img % (("%04d" % self.book_id)[0], self.book_id, self.book_id)
+        return title
+
     def get_page(self, url_page: str, title: str = ''):
         data = requests.get(url_page).content
         soup = Soup(data, 'html.parser')
