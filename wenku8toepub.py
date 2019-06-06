@@ -127,7 +127,7 @@ class Wenku8ToEpub:
         url_cover = self.api_img % (("%04d" % self.book_id)[0], self.book_id, self.book_id)
         data_cover = requests.get(url_cover).content
         # print(title, author, url_cover)
-        logger.info('#'*15 + '开始下载' + '#'*15)
+        logger.info('#' * 15 + '开始下载' + '#' * 15)
         logger.info('标题: ' + title + " 作者: " + author)
         self.book.set_identifier("%s, %s")
         self.book.set_title(title)
@@ -141,7 +141,8 @@ class Wenku8ToEpub:
             # 这是本卷的标题
             text = tar.get_text()
             # 排除空白表格
-            if len(text) == 1:
+            if text.encode() == b'\xc2\xa0':
+                # print('排除了', text, text.encode() == b'\xc2\xa0')
                 continue
             if len(a) == 0:
                 volume_text = tar.get_text()
@@ -211,18 +212,18 @@ help_str = '''
 wk2epub [-h] [-t] [-m] [-b] [list]
 
     list            一个数字列表，中间用空格隔开
-    
+
     -t              只获取文字，忽略图片。
                     但是图像远程连接仍然保留在文中。
                     此开关默认关闭，即默认获取图片。
-    
+
     -m              多线程模式。
                     该开关已默认打开。
-    
+
     -b              把生成的epub文件直接从stdio返回。
                     此时list长度应为1。
                     调试用。
-                    
+
     -h              显示本帮助。
 
 调用示例:
@@ -235,10 +236,8 @@ wk2epub [-h] [-t] [-m] [-b] [list]
     2019/4/5 2:51 AM
 '''
 
-
 logger = getLogger()
 lock = threading.Lock()
-
 
 if __name__ == '__main__':
     # wk = Wenku8ToEpub()
