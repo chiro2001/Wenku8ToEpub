@@ -129,7 +129,7 @@ class Wenku8ToEpub:
         # print(title, author, url_cover)
         logger.info('#' * 15 + '开始下载' + '#' * 15)
         logger.info('标题: ' + title + " 作者: " + author)
-        self.book.set_identifier("%s, %s")
+        self.book.set_identifier("%s, %s" % (title, author))
         self.book.set_title(title)
         self.book.add_author(author)
         self.book.set_cover('cover.jpg', data_cover)
