@@ -16,6 +16,8 @@ class Wenku8ToEpub:
         # 参数2：id
         self.api = "https://www.wenku8.net/novel/%s/%d/"
         self.api_img = "http://img.wkcdn.com/image/%s/%d/%ds.jpg"
+        self.img_splits = ['http://pic.wenku8.com/pictures/',
+                           'http://pic.wkcdn.com/pictures/']
         self.book = epub.EpubBook()
         self.thread_img_pool = []
         self.thread_pool = []
@@ -57,7 +59,9 @@ class Wenku8ToEpub:
     def fetch_img(self, url_img):
         logger.info('Fetching image: ' + url_img + '...')
         data_img = requests.get(url_img).content
-        filename = url_img.split('http://pic.wkcdn.com/pictures/')[-1]
+        filename = url_img
+        for sp in self.img_splits:
+            filename = url_img.split(sp)[-1]
         filetype = url_img.split('.')[-1]
         # print('done. filename:', filename, "filetype", filetype)
         img = epub.EpubItem(file_name="images/%s" % filename,
