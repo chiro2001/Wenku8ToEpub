@@ -54,7 +54,8 @@ class Wenku8ToEpub:
         self.api_info = "https://www.wenku8.net/book/%d.htm"
         self.api_img = "http://img.wkcdn.com/image/%s/%d/%ds.jpg"
         self.img_splits = ['http://pic.wenku8.com/pictures/',
-                           'http://pic.wkcdn.com/pictures/']
+                           'http://pic.wkcdn.com/pictures/',
+                           'http://picture.wenku8.com/pictures/']
         self.book = epub.EpubBook()
         self.thread_img_pool = []
         self.thread_pool = []
@@ -79,12 +80,12 @@ class Wenku8ToEpub:
         table = soup_cat.select('table')
         if len(table) == 0:
             self.logger.error("遇到错误")
-            return ''
+            return None
         table = table[0]
 
         if len(soup_cat.select("#title")) == 0:
             self.logger.error('该小说不存在！id = ' + str(book_id))
-            return ''
+            return None
         title = soup_cat.select("#title")[0].get_text()
         author = soup_cat.select("#info")[0].get_text().split('作者：')[-1]
         url_cover = self.api_img % (("%04d" % book_id)[0], book_id, book_id)
@@ -97,7 +98,7 @@ class Wenku8ToEpub:
         for i in range(len(spans)):
             span = spans[i]
             if '内容简介' in span.get_text():
-                brief = spans[i+1].get_text()
+                brief = spans[i + 1].get_text()
         return {
             "id": book_id,
             "name": title,
@@ -175,7 +176,8 @@ class Wenku8ToEpub:
             for it in self.thread_img_pool:
                 it.join()
 
-            data_page = (data_page.decode().replace('http://pic.wkcdn.com/pictures/', 'images/')).encode()
+            for url in self.img_splits:
+                data_page = (data_page.decode().replace(url, 'images/')).encode()
 
         page.set_content(data_page)
         lock.acquire()
@@ -189,7 +191,7 @@ class Wenku8ToEpub:
     def get_book(self, book_id: int, savepath: str = '',
                  fetch_image: bool = True,
                  multiple: bool = True, bin_mode: bool = False,
-                 mlogger = None):
+                 mlogger=None):
         if mlogger is not None:
             self.logger = mlogger
         self.book_id = book_id
@@ -301,7 +303,7 @@ wk2epub [-h] [-t] [-m] [-b] [list]
 
     -m              多线程模式。
                     该开关已默认打开。
-    
+
     -i              显示该书信息。
 
     -b              把生成的epub文件直接从stdio返回。
