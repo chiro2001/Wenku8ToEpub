@@ -56,6 +56,10 @@ class Wenku8ToEpub:
         self.img_splits = ['http://pic.wenku8.com/pictures/',
                            'http://pic.wkcdn.com/pictures/',
                            'http://picture.wenku8.com/pictures/']
+        self.api_login = 'http://www.wenku8.net/login.php?do=submit"'
+        self.api_serach = 'http://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=%s'
+        self.cookies = ''
+        self.cookie_jar = None
         self.book = epub.EpubBook()
         self.thread_img_pool = []
         self.thread_pool = []
@@ -69,6 +73,50 @@ class Wenku8ToEpub:
         self.chapters = []
         self.book_id = 0
         self.logger = logger
+
+    # 登录，能够使用搜索功能。
+    def login(self, username='lanceliang', password='1352040930lxr'):
+        payload = {'action': 'login',
+                   'jumpurl': '',
+                   'username': username,
+                   'password': password}
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        response = requests.request("POST", self.api_login, headers=headers, data=payload)
+        html = response.content.decode('gbk')
+        if '登录成功' not in html:
+            self.logger.error("登录失败")
+            return
+        cookie_value = ''
+        for key, value in response.cookies.items():
+            cookie_value += key + '=' + value + ';'
+        self.cookies = cookie_value
+        self.cookie_jar = response.cookies
+
+    # 搜索，应该先登录
+    def search(self, key: str):
+        results = {
+            'key': key,
+            'books': []
+        }
+        if len(self.cookies) == 0 or self.cookie_jar is None:
+            # 还没有登录
+            self.logger.error("请先登录再使用搜索功能")
+            return results
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:73.0) Gecko/20100101 Firefox/73.0',
+            'Content-Type': 'multipart/form-data; boundary=--------------------------607040101744888865545920',
+            'Cookie': self.cookies
+        }
+        # 注意编码问题
+        response = requests.request("GET", 'http://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=云', headers=headers, cookies=self.cookie_jar)
+        html = response.content.decode("gbk", errors='ignore')
+        # soup = Soup(response.content, 'html.parser')
+        soup = Soup(html, 'html.parser')
+        print(soup.find_all('a'))
+        # print()
+
 
     # 获取书籍信息。
     # {
@@ -326,10 +374,12 @@ logger = getLogger()
 lock = threading.Lock()
 
 if __name__ == '__main__':
-    # wk = Wenku8ToEpub()
+    wk = Wenku8ToEpub()
     # # wk.get_book(2019)
     # print(wk.bookinfo(1))
-    # exit()
+    wk.login()
+    print(wk.search('1234'))
+    exit()
     opts, args = getopt.getopt(sys.argv[1:], '-h-t-m-b-i', [])
     _fetch_image = True
     _multiple = True
