@@ -131,9 +131,18 @@ class Wenku8ToEpub:
             for n in re.findall('\d', response.url)[1:]:
                 bid = bid + n
             bid = int(bid)
-            cover = soup.find_all('img')[1].get_attribute_list('src')[0]
-            status = soup.find_all('table')[0].find_all('tr')[2].get_text().replace('\n', ' ')
-            brief = soup.find_all('table')[2].find_all('td')[1].find_all('span')[4].get_text()
+            try:
+                cover = soup.find_all('img')[1].get_attribute_list('src')[0]
+            except IndexError:
+                cover = None
+            try:
+                status = soup.find_all('table')[0].find_all('tr')[2].get_text().replace('\n', ' ')
+            except IndexError:
+                status = None
+            try:
+                brief = soup.find_all('table')[2].find_all('td')[1].find_all('span')[4].get_text()
+            except IndexError:
+                brief = None
             book = {
                 'title': title, 'bid': bid, 'cover': cover, 'status': status, 'brief': brief
             }
@@ -439,13 +448,13 @@ logger = getLogger()
 lock = threading.Lock()
 
 if __name__ == '__main__':
-    wk = Wenku8ToEpub()
+    # wk = Wenku8ToEpub()
     # # wk.get_book(2019)
     # print(wk.bookinfo(1))
     # wk.login()
     # print(wk.search('云'))
-    print(wk.search('东云'))
-    exit()
+    # print(wk.search('东云'))
+    # exit()
     opts, args = getopt.getopt(sys.argv[1:], '-h-t-m-b-i', [])
     _fetch_image = True
     _multiple = True
