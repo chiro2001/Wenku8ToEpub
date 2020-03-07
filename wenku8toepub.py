@@ -143,7 +143,10 @@ class Wenku8ToEpub:
             try:
                 brief = soup.find_all('table')[2].find_all('td')[1].find_all('span')[4].get_text()
             except IndexError:
-                brief = None
+                spans = soup.find_all('span')
+                for i in range(len(spans)):
+                    if '内容简介' in spans[i].get_text():
+                        brief = spans[i+1].get_text()
             book = {
                 'title': title, 'bid': bid, 'cover': cover, 'status': status, 'brief': brief
             }
@@ -235,7 +238,8 @@ class Wenku8ToEpub:
             "author": author,
             "brief": brief,
             "cover": url_cover,
-            'copyright': iscopyright
+            'copyright': iscopyright,
+            'update': update
         }
 
     # 获取版权状态
@@ -338,19 +342,19 @@ class Wenku8ToEpub:
         chunk_size = 1024 * 100  # 单次请求最大值
         # print(response.headers)
         content_size = 0  # 内容体总大小
-        logger.info('该书没有版权，开始下载TXT文件转化为EPUB')
+        self.logger.info('该书没有版权，开始下载TXT文件转化为EPUB')
         data_download = io.BytesIO()
         for data in response.iter_content(chunk_size=chunk_size):
             data_download.write(data)
             content_size = int(content_size + len(data))
-            logger.info('已经下载 %s KB' % (content_size // 1024))
+            self.logger.info('已经下载 %s KB' % (content_size // 1024))
         # with open('%s.txt' % self.book_id, 'w', encoding='gbk') as f:
         #     f.write(txt)
         # with open('%s.txt' % self.book_id, 'r', encoding='gbk') as f:
         #     txt = f.read()
         data_download.seek(0)
         txt = data_download.read().decode('gbk', errors='ignore')
-        logger.info('TXT下载完成')
+        self.logger.info('TXT下载完成')
         title = re.findall('<.+>', txt[:81])[0][1:-1]
         txt = txt[40 + len(title):-76]
         # print(txt)
