@@ -195,7 +195,7 @@ class Wenku8ToEpub:
 
     # 获取书籍信息。
     # {
-    #   id, name, author, brief, cover
+    #   id, name, author, brief, cover, copyright
     # }
     def bookinfo(self, book_id: int):
         url_cat = "%s%s" % (self.api % (("%04d" % book_id)[0], book_id), "index.htm")
@@ -217,6 +217,13 @@ class Wenku8ToEpub:
         brief = ''
         url_cat2 = self.api_info % (book_id)
         soup_cat2 = Soup(requests.get(url_cat2).content, 'html.parser')
+        update = ''
+        for td in soup_cat2.find_all('td'):
+            if '最后更新' in td.get_text():
+                update = td.get_text()[5:]
+        iscopyright = True
+        if '因版权问题，文库不再提供该小说的在线阅读与下载服务！' in soup_cat2.get_text():
+            iscopyright = False
         spans = soup_cat2.select('span')
         for i in range(len(spans)):
             span = spans[i]
@@ -227,7 +234,8 @@ class Wenku8ToEpub:
             "name": title,
             "author": author,
             "brief": brief,
-            "cover": url_cover
+            "cover": url_cover,
+            'copyright': iscopyright
         }
 
     # 获取版权状态
@@ -581,8 +589,8 @@ logger = getLogger()
 lock = threading.Lock()
 
 if __name__ == '__main__':
-    wk = Wenku8ToEpub()
-    wk.get_book(1614)
+    # wk = Wenku8ToEpub()
+    # wk.get_book(1614)
     # wk.get_book(1016)
     # wk.get_book(1447)
     # print(wk.bookinfo(1))
