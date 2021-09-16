@@ -1,31 +1,21 @@
 ```
-把www.wenku8.net的轻小说在线转换成epub格式。wenku8.net没有版权的小说则下载TXT文件然后转换为epub文件。
+把 www.wenku8.net 的轻小说在线转换成epub格式。
+wenku8.net 没有版权的小说则下载 TXT 文件然后转换为 epub 文件。
 
-wk2epub [-h] [-t] [-m] [-b] [list]
+wk2epub [-h] [-t] [-m] [-b] [list] [-s search_word] [-p proxy_url]
 
-    list            一个数字列表，中间用空格隔开
-
-    -t              只获取文字，忽略图片。
-                    但是图像远程连接仍然保留在文中。
+    list            一个数字列表，表示wenku8，中间用空格隔开
+    -t              只获取文字，忽略图片，但是图像远程连接仍然保留在文中。
                     此开关默认关闭，即默认获取图片。
-
-    -m              多线程模式。
-                    该开关已默认打开。
-
     -i              显示该书信息。
-
-    -b              把生成的epub文件直接从stdio返回。
-                    此时list长度应为1。
-                    调试用。
-
+    -s search_key   按照关键词搜索书籍。
+    -p proxy_url    使用代理。
+    -b              把生成的epub文件直接从标准输出返回。此时list长度应为1。
     -h              显示本帮助。
 
-调用示例:
-    wk2epub -t 1 1213
-
-关于:
-    https://github.com/LanceLiang2018/Wenku8ToEpub
-
-版本:
-    2020/3/8 1:45 AM
+    Example:        wk2epub -p http://router.chiro.work:7890 -t 2541
+    About:          https://github.com/chiro2001/Wenku8ToEpub
+    Version:        2021/9/16 22:43 PM
 ```
+
+感谢 Contributors。
