@@ -207,8 +207,8 @@ class Wenku8ToEpub:
     # }
     def bookinfo(self, book_id: int):
         url_cat = "%s%s" % (self.api % (("%04d" % book_id)[0], book_id), "index.htm")
-        resp = requests.get(url_cat, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content, 'html.parser',
-        soup_cat = Soup(resp)
+        resp = requests.get(url_cat, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content
+        soup_cat = Soup(resp, 'html.parser')
         table = soup_cat.select('table')
         if len(table) == 0:
             self.logger.error("遇到错误")
@@ -618,7 +618,7 @@ lock = threading.Lock()
 
 if __name__ == '__main__':
     wk = Wenku8ToEpub()
-    wk.get_book(1614)
+    #wk.get_book(1614)
     # wk.get_book(1016)
     # wk.get_book(1447)
     # print(wk.bookinfo(1))
@@ -627,7 +627,7 @@ if __name__ == '__main__':
     # print(wk.search('东云'))
     # print(wk.search('入间人间'))
     # print(wk.get_book_no_copyright(1614))
-    exit()
+    #exit()
 
     opts, args = getopt.getopt(sys.argv[1:], '-h-t-m-b-i', [])
     _fetch_image = True
