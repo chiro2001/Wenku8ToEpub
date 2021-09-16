@@ -5,62 +5,69 @@ from ebooklib import epub
 import os
 import sys
 import getopt
-from base_logger import getLogger
+from base_logger import get_logger
 import threading
 import io
-import copy
 import re
-
-
-class MLogger:
-    def __init__(self):
-        self.data = io.StringIO()
-
-    def write(self, content: str):
-        self.data.write(content + '\n')
-        print(content)
-
-    def read_all(self):
-        lock.acquire()
-        data2 = copy.deepcopy(self.data)
-        data2.seek(0)
-        d = data2.read()
-        lock.release()
-        return d
-
-    def info(self, message):
-        self.write(message)
-
-    def error(self, message):
-        self.write(message)
-
-    def warning(self, message):
-        self.write(message)
-
-    def warn(self, message):
-        self.write(message)
-
-    def critical(self, message):
-        self.write(message)
-
-    def debug(self, message):
-        self.write(message)
+import signal
 
 
 class Wenku8ToEpub:
-    def __init__(self):
+    USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' \
+                 'Chrome/90.0.4430.212 Safari/537.36'
+
+    class BaseError(Exception):
+        def __init__(self, data: str = None):
+            self.data = data
+            logger.error(self.__str__())
+
+        def __str__(self):
+            return f"Error: {self.__class__.__name__}{(' : %s' % self.data) if self.data is not None else ''}"
+
+    class ArgsError(BaseError):
+        pass
+
+    class Watcher:
+        # 当 Ctrl + C 结束程序，保存当前进度
+        instance = None
+
+        def __init__(self, on_exit, args: list = None, kwargs: dict = None):
+            if on_exit is None:
+                return
+            self.args: list = args
+            if self.args is None:
+                self.args = []
+            self.kwargs: list = kwargs
+            if self.kwargs is None:
+                self.kwargs = {}
+            self.on_exit = on_exit
+            Wenku8ToEpub.Watcher.instance = self
+
+        def start_watch(self):
+            signal.signal(signal.SIGINT, self.watch)
+
+        @staticmethod
+        def watch(*args, **kwargs):
+            self = Wenku8ToEpub.Watcher.instance
+            self.on_exit(*self.args, **self.kwargs)
+
+    def __init__(self, username: str = 'wenku8toepub', password: str = 'wenku8toepub', proxy: str = None, **kwargs):
         # api格式
         # 参数1：id千位开头
         # 参数2：id
         self.api = "https://www.wenku8.net/novel/%s/%d/"
         self.api_info = "https://www.wenku8.net/book/%d.htm"
-        self.api_img = "http://img.wkcdn.com/image/%s/%d/%ds.jpg"
+        # self.api_img = "http://img.wkcdn.com/image/%s/%d/%ds.jpg"
+        self.api_img = "https://img.wenku8.com/image/%s/%d/%ds.jpg"
         self.img_splits = ['http://pic.wenku8.com/pictures/',
                            'http://pic.wkcdn.com/pictures/',
-                           'http://picture.wenku8.com/pictures/']
+                           'http://picture.wenku8.com/pictures/',
+                           'https://pic.wenku8.com/pictures/',
+                           'https://pic.wkcdn.com/pictures/',
+                           'https://picture.wenku8.com/pictures/']
         self.api_login = 'http://www.wenku8.net/login.php?do=submit"'
-        self.api_serach1 = 'http://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=%s'
-        self.api_serach2 = 'http://www.wenku8.net/modules/article/search.php?searchtype=author&searchkey=%s'
+        self.api_search_1 = 'http://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=%s'
+        self.api_search_2 = 'http://www.wenku8.net/modules/article/search.php?searchtype=author&searchkey=%s'
         self.api_txt = 'http://dl.wenku8.com/down.php?type=txt&id=%d'
         self.cookies = ''
         self.cookie_jar = None
@@ -68,29 +75,61 @@ class Wenku8ToEpub:
         self.thread_img_pool = []
         self.thread_pool = []
         # 用于章节排序的文件名
-        self.sumi = 0
+        self.sum_index = 0
         # 目录管理
         self.toc = []
         # 主线
         self.spine = ['cover', 'nav']
         # 当前章节
         self.chapters = []
-        self.book_id = 0
-        self.logger = logger
+        self.book_id: int = 0
         self.image_size = None
         self.image_count = 0
 
+        self.proxy: str = proxy
+
+        self.lock = threading.Lock()
+
+        self.logger = kwargs.get('logger', None)
+        if self.logger is None:
+            self.logger = get_logger(__name__)
+
+        # 搜索用账号
+        self.username, self.password = username, password
+
+        # 解决结束程序的进度保存问题
+        self.running: bool = False
+        self.watcher = Wenku8ToEpub.Watcher(on_exit=self.on_exit)
+
+    def on_exit(self):
+        logger.warning(f"Exiting and saving file...")
+        self.lock.acquire()
+        self.running = False
+        self.lock.release()
+
+    def get_proxy(self) -> dict:
+        if self.proxy is None:
+            return {}
+        return {
+            'http': self.proxy,
+            'https': self.proxy
+        }
+
     # 登录，能够使用搜索功能。
-    def login(self, username='lanceliang', password='1352040930lxr'):
+    def login(self, username: str = None, password: str = None):
+        username = self.username if username is None else username
+        password = self.password if password is None else password
+        if username is None or password is None:
+            raise Wenku8ToEpub.ArgsError()
         payload = {'action': 'login',
                    'jumpurl': '',
                    'username': username,
                    'password': password}
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'
+            'User-Agent': Wenku8ToEpub.USER_AGENT
         }
-        response = requests.request("POST", self.api_login, headers=headers, data=payload)
+        response = requests.request("POST", self.api_login, headers=headers, data=payload, proxies=self.get_proxy())
         html = response.content.decode('gbk')
         if '登录成功' not in html:
             self.logger.error("登录失败")
@@ -103,8 +142,8 @@ class Wenku8ToEpub:
 
     # 搜索，应该先登录
     def search(self, key: str):
-        books = self.search_one(self.api_serach1, key)
-        books.extend(self.search_one(self.api_serach2, key))
+        books = self.search_one(self.api_search_1, key)
+        books.extend(self.search_one(self.api_search_2, key))
         return books
 
     def search_one(self, selected_api: str, key: str):
@@ -114,7 +153,7 @@ class Wenku8ToEpub:
             self.logger.error("请先登录再使用搜索功能")
             return []
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:73.0) Gecko/20100101 Firefox/73.0',
+            'User-Agent': Wenku8ToEpub.USER_AGENT,
             'Content-Type': 'multipart/form-data; boundary=--------------------------607040101744888865545920',
             'Cookie': self.cookies
         }
@@ -124,7 +163,8 @@ class Wenku8ToEpub:
         key_arg = ''
         for i in range(0, len(encodings), 2):
             key_arg = key_arg + '%' + encodings[i] + encodings[i + 1]
-        response = requests.request("GET", selected_api % key_arg, headers=headers, cookies=self.cookie_jar)
+        response = requests.request("GET", selected_api % key_arg, headers=headers, cookies=self.cookie_jar,
+                                    proxies=self.get_proxy())
         html = response.content.decode("gbk", errors='ignore')
         soup = Soup(html, 'html.parser')
 
@@ -145,6 +185,7 @@ class Wenku8ToEpub:
                 status = soup.find_all('table')[0].find_all('tr')[2].get_text().replace('\n', ' ')
             except IndexError:
                 status = None
+            brief = '(Missing...)'
             try:
                 brief = soup.find_all('table')[2].find_all('td')[1].find_all('span')[4].get_text()
             except IndexError:
@@ -157,32 +198,11 @@ class Wenku8ToEpub:
             }
             return [book, ]
 
-        '''
-        # 暂时只搜索一页内容
-        links = soup.find_all('a')
-        books = []
-        for a in links:
-            if a.has_attr('href') and len(a.get_attribute_list('href')) != 0:
-                href = a.get_attribute_list('href')[0]
-                if '//www.wenku8.net/book/' in href and href not in books:
-                    books.append(href)
-        # print(books)
-        bids = []
-        for book in books:
-            numbers = re.findall('\d', book)[1:]
-            bid = ''
-            for n in numbers:
-                bid = bid + n
-            bids.append(int(bid))
-        print(bids)
-        '''
         td = soup.find('td')
         books = []
         for content in td.children:
             if not isinstance(content, bs4.element.Tag):
                 continue
-            # print(content)
-            # print('#' * 64)
             title = content.find_all('a')[1].get_text()
             url = content.find_all('a')[1].get_attribute_list('href')[0]
             numbers = re.findall('\d', url)[1:]
@@ -193,7 +213,6 @@ class Wenku8ToEpub:
             cover = content.find_all('img')[0].get_attribute_list('src')[0]
             status = content.find_all('p')[0].get_text()
             brief = content.find_all('p')[1].get_text()[3:]
-            # print(title, bid, cover, status, brief)
             book = {
                 'title': title, 'bid': bid, 'cover': cover, 'status': status, 'brief': brief
             }
@@ -205,9 +224,9 @@ class Wenku8ToEpub:
     # {
     #   id, name, author, brief, cover, copyright
     # }
-    def bookinfo(self, book_id: int):
+    def book_info(self, book_id: int):
         url_cat = "%s%s" % (self.api % (("%04d" % book_id)[0], book_id), "index.htm")
-        resp = requests.get(url_cat, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content
+        resp = requests.get(url_cat, headers={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy()).content
         soup_cat = Soup(resp, 'html.parser')
         table = soup_cat.select('table')
         if len(table) == 0:
@@ -221,18 +240,19 @@ class Wenku8ToEpub:
         title = soup_cat.select("#title")[0].get_text()
         author = soup_cat.select("#info")[0].get_text().split('作者：')[-1]
         url_cover = self.api_img % (("%04d" % book_id)[0], book_id, book_id)
-        # print(title, author, url_cover)
 
         brief = ''
-        url_cat2 = self.api_info % (book_id)
-        soup_cat2 = Soup(requests.get(url_cat2, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content, 'html.parser')
+        url_cat2 = self.api_info % (book_id,)
+        soup_cat2 = Soup(
+            requests.get(url_cat2, headers={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy()).content,
+            'html.parser')
         update = ''
         for td in soup_cat2.find_all('td'):
             if '最后更新' in td.get_text():
                 update = td.get_text()[5:]
-        iscopyright = True
+        is_copyright = True
         if '因版权问题，文库不再提供该小说的在线阅读与下载服务！' in soup_cat2.get_text():
-            iscopyright = False
+            is_copyright = False
         spans = soup_cat2.select('span')
         for i in range(len(spans)):
             span = spans[i]
@@ -244,7 +264,7 @@ class Wenku8ToEpub:
             "author": author,
             "brief": brief,
             "cover": url_cover,
-            'copyright': iscopyright,
+            'copyright': is_copyright,
             'update': update
         }
 
@@ -252,7 +272,8 @@ class Wenku8ToEpub:
     def copyright(self, book_id=None):
         if book_id is None:
             book_id = self.book_id
-        data = requests.get(self.api_info % book_id,headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content
+        data = requests.get(self.api_info % book_id, headers={'User-Agent': Wenku8ToEpub.USER_AGENT},
+                            proxies=self.get_proxy()).content
         soup = Soup(data, 'html.parser')
         if '因版权问题，文库不再提供该小说的在线阅读与下载服务！' in soup.get_text():
             return False
@@ -260,7 +281,9 @@ class Wenku8ToEpub:
 
     def id2name(self, book_id: int):
         url_cat = "%s%s" % (self.api % (("%04d" % book_id)[0], book_id), "index.htm")
-        soup_cat = Soup(requests.get(url_cat,header={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'} ).content, 'html.parser')
+        soup_cat = Soup(
+            requests.get(url_cat, header={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy()).content,
+            'html.parser')
         table = soup_cat.select('table')
         if len(table) == 0:
             self.logger.error("遇到错误")
@@ -276,7 +299,7 @@ class Wenku8ToEpub:
         return title
 
     def get_page(self, url_page: str, title: str = ''):
-        data = requests.get(url_page, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content
+        data = requests.get(url_page, headers={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy()).content
         soup = Soup(data, 'html.parser')
         content = soup.select('#content')[0]
         # 去除ul属性
@@ -287,42 +310,56 @@ class Wenku8ToEpub:
         if self.image_size is not None and self.image_size < self.image_count:
             self.logger.warn('达到最大图像总计大小，取消图像下载')
             # 此时文档中的链接是错误的...所以贪心要付出代价
+            # 上一行注释是啥来着(?)
+            return
+        if not self.running:
+            logger.warning(f'Canceling image: {url_img}')
             return
         self.logger.info('->Fetching image: ' + url_img + '...')
-        data_img = requests.get(url_img, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content
+        data_img = requests.get(url_img, headers={'User-Agent': Wenku8ToEpub.USER_AGENT},
+                                proxies=self.get_proxy()).content
         self.image_count = self.image_count + len(data_img)
-        filename = url_img
+        filename = None
         for sp in self.img_splits:
-            filename = url_img.split(sp)[-1]
+            if sp in url_img:
+                filename = url_img.split(sp)[-1]
+        if filename is None:
+            filename = url_img.split(':')[-1].split('//')[-1]
         filetype = url_img.split('.')[-1]
         # print('done. filename:', filename, "filetype", filetype)
         img = epub.EpubItem(file_name="images/%s" % filename,
                             media_type="image/%s" % filetype, content=data_img)
-        lock.acquire()
+        self.lock.acquire()
         self.book.add_item(img)
-        lock.release()
+        self.lock.release()
         self.logger.info('<-Done image: ' + url_img)
 
     def fetch_chapter(self, a, order: int, fetch_image: bool):
         if a.get_text() == '插图':
             self.logger.info('Images: ' + a.get_text())
         else:
-            self.logger.info('chapter: ' + a.get_text())
+            self.logger.info('Chapter: ' + a.get_text())
 
         title_page = a.get_text()
 
         url_page = "%s%s" % (self.api % (("%04d" % self.book_id)[0], self.book_id), a.get('href'))
 
+        if not self.running:
+            logger.warning(f'Canceling chapter: {url_page}')
+            return
+
         data_page = self.get_page(url_page, title=title_page)
-        page = epub.EpubHtml(title=title_page, file_name='%s.xhtml' % self.sumi)
+        self.lock.acquire()
+        page = epub.EpubHtml(title=title_page, file_name='%s.xhtml' % self.sum_index)
         # 多线程模式下文件名会不按照顺序...
-        self.sumi = self.sumi + 1
+        self.sum_index = self.sum_index + 1
+        self.lock.release()
 
         if fetch_image is True:
             soup_tmp = Soup(data_page, 'html.parser')
-            imgcontent = soup_tmp.select(".imagecontent")
+            img_content = soup_tmp.select(".imagecontent")
             self.thread_img_pool = []
-            for img in imgcontent:
+            for img in img_content:
                 url_img = img.get("src")
                 # 排除其他站点的图片，防止访问超时
                 origin = False
@@ -346,22 +383,16 @@ class Wenku8ToEpub:
                     data_page = (data_page.decode().replace(url, 'images/')).encode()
 
         page.set_content(data_page)
-        lock.acquire()
+        self.lock.acquire()
         self.book.add_item(page)
-        lock.release()
+        self.lock.release()
 
-        # self.toc[-1][1].append(page)
-        # self.spine.append(page)
         self.chapters[order] = page
 
-    def get_book_no_copyright(self, targets,
-                              bin_mode: bool = False,
-                              savepath: str = '',
-                              author: str = 'undefind'):
-        # txt = requests.get(self.api_txt % self.book_id).content.decode('gbk', errors='ignore')
-        response = requests.get(self.api_txt % self.book_id, stream=True, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'})
+    def get_book_no_copyright(self, targets, author: str = 'undefined', **kwargs):
+        response = requests.get(self.api_txt % self.book_id, stream=True,
+                                headers={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy())
         chunk_size = 1024 * 100  # 单次请求最大值
-        # print(response.headers)
         content_size = 0  # 内容体总大小
         self.logger.info('该书没有版权，开始下载TXT文件转化为EPUB')
         data_download = io.BytesIO()
@@ -369,17 +400,11 @@ class Wenku8ToEpub:
             data_download.write(data)
             content_size = int(content_size + len(data))
             self.logger.info('已经下载 %s KB' % (content_size // 1024))
-        # with open('%s.txt' % self.book_id, 'w', encoding='gbk') as f:
-        #     f.write(txt)
-        # with open('%s.txt' % self.book_id, 'r', encoding='gbk') as f:
-        #     txt = f.read()
         data_download.seek(0)
         txt = data_download.read().decode('gbk', errors='ignore')
         self.logger.info('TXT下载完成')
         title = re.findall('<.+>', txt[:81])[0][1:-1]
         txt = txt[40 + len(title):-76]
-        # print(txt)
-        # print(title)
 
         volumes = []
         chapters = []
@@ -398,10 +423,9 @@ class Wenku8ToEpub:
 
         last_end = 0
         length = len(txt)
-        # for v in chapters:
         for i in range(len(chapters)):
             v = chapters[i]
-            txts = []
+            txt_all = []
             volume_text = v['volume']
             self.logger.info('volume: ' + volume_text)
             for c in v['chapters']:
@@ -416,72 +440,57 @@ class Wenku8ToEpub:
                 for line in txt_slice.splitlines():
                     txt2 = txt2 + '<p>%s</p>' % line
                 txt_slice = txt2
-                txts.append(txt_slice)
+                txt_all.append(txt_slice)
             if i + 1 == len(chapters):
-                txts.append(txt[last_end:])
+                txt_all.append(txt[last_end:])
             else:
                 point = txt.find(chapters[i + 1]['volume'], last_end, length)
                 # print('point', point)
-                txts.append(txt[last_end:point])
+                txt_all.append(txt[last_end:point])
                 last_end = point - 1
 
-            if len(txts) != len(v['chapters']):
+            if len(txt_all) != len(v['chapters']):
                 # print('err')
                 # 虽然不知道为啥，这么写就对了
-                txts = txts[1:]
+                txt_all = txt_all[1:]
 
             # 先增加卷
             self.toc.append((epub.Section(volume_text), []))
-            volume = epub.EpubHtml(title=volume_text, file_name='%s.html' % self.sumi)
-            self.sumi = self.sumi + 1
+            self.lock.acquire()
+            volume = epub.EpubHtml(title=volume_text, file_name='%s.html' % self.sum_index)
+            self.sum_index = self.sum_index + 1
             volume.set_content(("<h1>%s</h1><br>" % volume_text).encode())
             self.book.add_item(volume)
+            self.lock.release()
 
             # 增加章节
             for i in range(len(v['chapters'])):
                 chapter_title = v['chapters'][i]
                 self.logger.info('chapter: ' + chapter_title)
-                page = epub.EpubHtml(title=chapter_title, file_name='%s.xhtml' % self.sumi)
-                self.sumi = self.sumi + 1
-                page.set_content(txts[i])
-                lock.acquire()
+                self.lock.acquire()
+                page = epub.EpubHtml(title=chapter_title, file_name='%s.xhtml' % self.sum_index)
+                self.sum_index = self.sum_index + 1
+                self.lock.release()
+                page.set_content(txt_all[i])
+                self.lock.acquire()
                 self.book.add_item(page)
-                lock.release()
+                self.lock.release()
                 self.toc[-1][1].append(page)
                 self.spine.append(page)
 
-        # print('de')
-        # exit()
+        self.save_book(title, author, **kwargs)
 
-        self.book.toc = self.toc
-
-        # add navigation files
-        self.book.add_item(epub.EpubNcx())
-        self.book.add_item(epub.EpubNav())
-
-        # create spine
-        self.book.spine = self.spine
-        if bin_mode is True:
-            stream = io.BytesIO()
-            epub.write_epub(stream, self.book)
-            stream.seek(0)
-            return stream.read()
-        else:
-            epub.write_epub(os.path.join(savepath, '%s - %s.epub' % (title, author)), self.book)
-
-    def get_book(self, book_id: int, savepath: str = '',
+    def get_book(self, book_id: int,
                  fetch_image: bool = True,
-                 multiple: bool = True, bin_mode: bool = False,
-                 mlogger=None, image_size=None):
+                 image_size=None, **kwargs):
         # :param image_size 图像总计最大大小（字节数）
-        if mlogger is not None:
-            self.logger = mlogger
         self.image_size = image_size
         self.book_id = book_id
 
         url_cat = "%s%s" % (self.api % (("%04d" % self.book_id)[0], self.book_id), "index.htm")
-        soup_cat = Soup(requests.get(url_cat,
-         headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content, 'html.parser')
+        soup_cat = Soup(
+            requests.get(url_cat, headers={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy()).content,
+            'html.parser')
         table = soup_cat.select('table')
         if len(table) == 0:
             self.logger.error("遇到错误")
@@ -494,8 +503,8 @@ class Wenku8ToEpub:
         title = soup_cat.select("#title")[0].get_text()
         author = soup_cat.select("#info")[0].get_text().split('作者：')[-1]
         url_cover = self.api_img % (("%04d" % self.book_id)[0], self.book_id, self.book_id)
-        data_cover = requests.get(url_cover, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'}).content
-        # print(title, author, url_cover)
+        data_cover = requests.get(url_cover, headers={'User-Agent': Wenku8ToEpub.USER_AGENT},
+                                  proxies=self.get_proxy()).content
         self.logger.info('#' * 15 + '开始下载' + '#' * 15)
         self.logger.info('标题: ' + title + " 作者: " + author)
         self.book.set_identifier("%s, %s" % (title, author))
@@ -503,14 +512,18 @@ class Wenku8ToEpub:
         self.book.add_author(author)
         self.book.set_cover('cover.jpg', data_cover)
 
+        self.running = True
+        self.watcher.start_watch()
+
         targets = table.select('td')
-        iscopyright = self.copyright()
-        if not iscopyright:
-            # if iscopyright:
+        is_copyright = self.copyright()
+        if not is_copyright:
+            # if is_copyright:
             # 没有版权的时候
-            return self.get_book_no_copyright(targets, bin_mode=bin_mode, author=author)
+            return self.get_book_no_copyright(targets, bin_mode=kwargs.get('bin_mode', False), author=author)
 
         order = 0
+        chapter_names = []
         for tar in targets:
             a = tar.select('a')
             # 这是本卷的标题
@@ -535,18 +548,21 @@ class Wenku8ToEpub:
                         self.toc[-1][1].append(chapter)
                         self.spine.append(chapter)
 
-                self.chapters = [None for i in range(len(targets))]
+                self.chapters = [None for _ in range(len(targets))]
                 order = 0
                 self.toc.append((epub.Section(volume_text), []))
-                volume = epub.EpubHtml(title=volume_text, file_name='%s.html' % self.sumi)
-                self.sumi = self.sumi + 1
+                self.lock.acquire()
+                volume = epub.EpubHtml(title=volume_text, file_name='%s.html' % self.sum_index)
+                self.sum_index = self.sum_index + 1
                 volume.set_content(("<h1>%s</h1><br>" % volume_text).encode())
                 self.book.add_item(volume)
+                self.lock.release()
                 continue
             # 是单章
             a = a[0]
 
             th = threading.Thread(target=self.fetch_chapter, args=(a, order, fetch_image))
+            chapter_names.append(a.get_text())
             order = order + 1
             self.thread_pool.append(th)
             th.setDaemon(True)
@@ -564,103 +580,109 @@ class Wenku8ToEpub:
                 self.toc[-1][1].append(chapter)
                 self.spine.append(chapter)
 
-        self.book.toc = self.toc
+        self.save_book(title, author, **kwargs)
 
-        # add navigation files
-        self.book.add_item(epub.EpubNcx())
-        self.book.add_item(epub.EpubNav())
+    def save_book(self, title: str, author: str, bin_mode: bool = False, save_path: str = '', index: int = None):
+        def generate_filename(index_: int):
+            return '%s - %s%s.epub' % (title, author, '' if index is None else f'({index_})')
 
-        # create spine
-        self.book.spine = self.spine
         if bin_mode is True:
             stream = io.BytesIO()
             epub.write_epub(stream, self.book)
             stream.seek(0)
             return stream.read()
+        if index is None:
+            self.book.toc = self.toc
+            # 添加目录信息
+            self.book.add_item(epub.EpubNcx())
+            self.book.add_item(epub.EpubNav())
+            # 创建主线，即从头到尾的阅读顺序
+            self.book.spine = self.spine
+
+        path = os.path.join(save_path, generate_filename(index_=index))
+        if os.path.exists(path):
+            if index is None:
+                logger.warning(f"{path} exists, saving to another file...")
+            self.save_book(title, author, bin_mode=bin_mode, save_path=save_path,
+                           index=(index + 1 if index is not None else 1))
         else:
-            epub.write_epub(os.path.join(savepath, '%s - %s.epub' % (title, author)), self.book)
+            epub.write_epub(path, self.book)
+            logger.warning(f"saved to {generate_filename(index_=index)}")
 
 
 help_str = '''
-把www.wenku8.net的轻小说在线转换成epub格式。wenku8.net没有版权的小说则下载TXT文件然后转换为epub文件。
+把 www.wenku8.net 的轻小说在线转换成epub格式。
+wenku8.net 没有版权的小说则下载 TXT 文件然后转换为 epub 文件。
 
-wk2epub [-h] [-t] [-m] [-b] [list]
+wk2epub [-h] [-t] [-m] [-b] [list] [-s search_word] [-p proxy_url]
 
-    list            一个数字列表，中间用空格隔开
-
-    -t              只获取文字，忽略图片。
-                    但是图像远程连接仍然保留在文中。
+    list            一个数字列表，表示wenku8，中间用空格隔开
+    -t              只获取文字，忽略图片，但是图像远程连接仍然保留在文中。
                     此开关默认关闭，即默认获取图片。
-
-    -m              多线程模式。
-                    该开关已默认打开。
-
     -i              显示该书信息。
-
-    -b              把生成的epub文件直接从stdio返回。
-                    此时list长度应为1。
-                    调试用。
-
+    -s search_key   按照关键词搜索书籍。
+    -p proxy_url    使用代理。
+    -b              把生成的epub文件直接从标准输出返回。此时list长度应为1。
     -h              显示本帮助。
 
-调用示例:
-    wk2epub -t 1 1213
-
-关于:
-    https://github.com/LanceLiang2018/Wenku8ToEpub
-
-版本:
-    2020/3/8 1:45 AM
+    Example:        wk2epub -t 1 1213
+    About:          https://github.com/chiro2001/Wenku8ToEpub
+    Version:        2021/9/16 22:43 PM
 '''
 
-logger = getLogger()
-lock = threading.Lock()
+logger = get_logger()
 
 if __name__ == '__main__':
-    wk = Wenku8ToEpub()
-    #wk.get_book(1614)
-    # wk.get_book(1016)
-    # wk.get_book(1447)
-    # print(wk.bookinfo(1))
-    # wk.login()
-    # print(wk.search('云'))
-    # print(wk.search('东云'))
-    # print(wk.search('入间人间'))
-    # print(wk.get_book_no_copyright(1614))
-    #exit()
-
-    opts, args = getopt.getopt(sys.argv[1:], '-h-t-m-b-i', [])
+    try:
+        _opts, _args = getopt.getopt(sys.argv[1:], '-h-t-b-i-os:p:', [])
+    except getopt.GetoptError as e:
+        logger.error(f'参数解析错误: {e}')
+        sys.exit(1)
     _fetch_image = True
-    _multiple = True
     _bin_mode = False
     _show_info = False
-    if len(args) == 0:
-        print(help_str)
-        sys.exit()
-    for name, val in opts:
+    _print_help = True
+    _run_mode = 'download'
+    _search_key: str = None
+    _proxy: str = None
+    for name, val in _opts:
         if '-h' == name:
             print(help_str)
             sys.exit()
         if '-t' == name:
             _fetch_image = False
-        if '-m' == name:
-            _multiple = True
         if '-b' == name:
             _bin_mode = True
         if '-i' == name:
             _show_info = True
-    try:
-        args = list(map(int, args))
-    except Exception as e:
-        logger.error("错误: 参数只接受数字。")
-        print(help_str)
-        sys.exit()
-
-    for _id in args:
-        wk = Wenku8ToEpub()
-        _bookinfo = wk.bookinfo(_id)
-        print('信息：ID:%s\t书名:%s\t作者:%s' % (_bookinfo['id'], _bookinfo['name'], _bookinfo['author']))
-        print('简介：\n%s' % _bookinfo['brief'])
-        res = wk.get_book(_id, fetch_image=_fetch_image, multiple=_multiple, bin_mode=_bin_mode)
-        if _bin_mode is True:
-            print(res)
+        if '-s' == name:
+            _run_mode = 'search'
+            _search_key = val
+        if '-p' == name:
+            _proxy = val
+            logger.warning(f'using proxy: {_proxy}')
+    if _run_mode == 'search':
+        wk = Wenku8ToEpub(proxy=_proxy)
+        _books = wk.search(_search_key)
+        for _book in _books:
+            logger.info(f"ID:{_book['bid']:4} {_book['title']:8} "
+                        f"{(_book['status'][:18] + '...') if len(_book['status']) >= 21 else _book['status']}")
+    else:
+        if len(_args) == 0:
+            print(help_str)
+            sys.exit()
+        try:
+            _args = list(map(int, _args))
+        except ValueError as e:
+            logger.error("错误: 参数只接受数字。")
+            logger.error(f"args: {_args}")
+            print(help_str)
+            sys.exit()
+        for _id in _args:
+            wk = Wenku8ToEpub(logger=logger, proxy=_proxy)
+            _book_info = wk.book_info(_id)
+            print('信息：ID:%s\t书名:%s\t作者:%s' % (_book_info['id'], _book_info['name'], _book_info['author']))
+            print('简介：\n%s' % _book_info['brief'])
+            res = wk.get_book(_id, fetch_image=_fetch_image, bin_mode=_bin_mode)
+            if _bin_mode is True:
+                print(res)

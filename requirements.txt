@@ -1,6 +1,6 @@
-requests==2.18.4
-six==1.11.0
-beautifulsoup4==4.9.3
-colorlog==5.0.1
-lxml==4.6.3
-Pygments==2.9.0
+requests
+six
+bs4
+colorlog
+lxml
+
