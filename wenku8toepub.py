@@ -513,7 +513,7 @@ class Wenku8ToEpub:
         self.book.set_identifier("%s, %s" % (title, author))
         self.book.set_title(title)
         self.book.add_author(author)
-        self.book.set_language('cn')
+        self.book.set_language('zh')
         self.book.set_cover('cover.jpg', data_cover)
 
         self.running = True
