@@ -304,7 +304,10 @@ class Wenku8ToEpub:
         content = soup.select('#content')[0]
         # 去除ul属性
         [s.extract() for s in content("ul")]
-        return ("<h1>%s</h1>%s" % (title, content.prettify())).encode()
+        # 替换br为p
+        content = re.sub('\<br/>', '</p>\n<p>', content.prettify())
+        # 加入段首2em缩进
+        return ("<h1>%s</h1><style>#content{text-indent: 2em;}</style>%s" % (title, content)).encode()
 
     def fetch_img(self, url_img):
         if self.image_size is not None and self.image_size < self.image_count:
@@ -510,6 +513,7 @@ class Wenku8ToEpub:
         self.book.set_identifier("%s, %s" % (title, author))
         self.book.set_title(title)
         self.book.add_author(author)
+        self.book.set_language('cn')
         self.book.set_cover('cover.jpg', data_cover)
 
         self.running = True
