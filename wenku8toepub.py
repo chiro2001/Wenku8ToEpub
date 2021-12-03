@@ -655,7 +655,7 @@ wk2epub [-h] [-t] [-m] [-b] [-s search_word] [-p proxy_url] [list]
 
     Example:        wk2epub -t 2541
     About:          https://github.com/chiro2001/Wenku8ToEpub
-    Version:        2021/9/16 22:43 PM
+    Version:        2021/12/03 10:53 AM
 '''
 
 logger = get_logger()
