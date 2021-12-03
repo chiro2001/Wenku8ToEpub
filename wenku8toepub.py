@@ -471,7 +471,12 @@ class Wenku8ToEpub:
                 page = epub.EpubHtml(title=chapter_title, file_name='%s.xhtml' % self.sum_index)
                 self.sum_index = self.sum_index + 1
                 self.lock.release()
-                text_content = txt_all[i]
+                # warn issue #7
+                try:
+                    text_content = txt_all[i]
+                except IndexError:
+                    logger.error(f"文本文件解析出错，本卷可能无法对齐标题与内容")
+                    continue
                 # fix issue #5: lxml.etree.ParserError: Document is empty
                 if len(text_content) == 0:
                     continue
@@ -687,8 +692,13 @@ if __name__ == '__main__':
         for _id in _args:
             wk = Wenku8ToEpub(logger=logger, proxy=_proxy)
             _book_info = wk.book_info(_id)
-            print('信息：ID:%s\t书名:%s\t作者:%s' % (_book_info['id'], _book_info['name'], _book_info['author']))
-            print('简介：\n%s' % _book_info['brief'])
+            # fix issue #6: UnicodeEncodeError: 'gbk' codec can't encode character
+            # (But I didn't reproduce the bug.)
+            try:
+                print('信息：ID:%s\t书名:%s\t作者:%s' % (_book_info['id'], _book_info['name'], _book_info['author']))
+                print('简介：\n%s' % _book_info['brief'])
+            except Exception as e:
+                logger.error(f"error when reading info: {e.__class__.__name__} {e}")
             res = wk.get_book(_id, fetch_image=_fetch_image, bin_mode=_bin_mode)
             if _bin_mode is True:
                 print(res)
