@@ -471,7 +471,12 @@ class Wenku8ToEpub:
                 page = epub.EpubHtml(title=chapter_title, file_name='%s.xhtml' % self.sum_index)
                 self.sum_index = self.sum_index + 1
                 self.lock.release()
-                page.set_content(txt_all[i])
+                text_content = txt_all[i]
+                # fix issue #5: lxml.etree.ParserError: Document is empty
+                if len(text_content) == 0:
+                    continue
+                # logger.info(f"text_content: {text_content[:20]}... ({len(text_content)})")
+                page.set_content(text_content)
                 self.lock.acquire()
                 self.book.add_item(page)
                 self.lock.release()
