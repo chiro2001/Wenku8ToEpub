@@ -51,7 +51,10 @@ class Wenku8ToEpub:
             self = Wenku8ToEpub.Watcher.instance
             self.on_exit(*self.args, **self.kwargs)
 
-    def __init__(self, username: str = 'wenku8toepub', password: str = 'wenku8toepub', proxy: str = None, **kwargs):
+    def __init__(self,
+                 username: str = 'wenku8toepub',
+                 password: str = 'wenku8toepub',
+                 proxy: str = None, **kwargs):
         # api格式
         # 参数1：id千位开头
         # 参数2：id
@@ -100,6 +103,9 @@ class Wenku8ToEpub:
         # 解决结束程序的进度保存问题
         self.running: bool = False
         self.watcher = Wenku8ToEpub.Watcher(on_exit=self.on_exit)
+
+        # 是否使用原书名做文件名
+        self.raw_book_name: bool = kwargs.get('raw_book_name', False)
 
     def on_exit(self):
         logger.warning(f"Exiting and saving file...")
@@ -593,8 +599,18 @@ class Wenku8ToEpub:
         self.save_book(title, author, **kwargs)
 
     def save_book(self, title: str, author: str, bin_mode: bool = False, save_path: str = '', index: int = None):
+        # fix issue #8
+        def remove_special_symbols(s: str, refill: str = '_') -> str:
+            symbols = """"';:<>./\\+`~!@#$%^&*"""
+            for symbol in symbols:
+                s = s.replace(symbol, refill)
+            return s
+
+        # noinspection PyStringFormat
         def generate_filename(index_: int):
-            return '%s - %s%s.epub' % (title, author, '' if index is None else f'({index_})')
+            return '%s - %s%s.epub' % (
+                *[remove_special_symbols(s) if not self.raw_book_name else s for s in [title, author]],
+                '' if index is None else f'({index_})')
 
         if bin_mode is True:
             stream = io.BytesIO()
@@ -632,9 +648,10 @@ wk2epub [-h] [-t] [-m] [-b] [-s search_word] [-p proxy_url] [list]
                     此开关默认关闭，即默认获取图片。
     -i              显示该书信息。
     -s search_key   按照关键词搜索书籍。
-    -p proxy_url    使用代理。
+    -p proxy_url    使用代理。(*_proxy等环境变量同样有效。)
     -b              把生成的epub文件直接从标准输出返回。此时list长度应为1。
     -h              显示本帮助。
+    -r              不剔除特殊符号而使用原书名作为文件名保存。
 
     Example:        wk2epub -t 2541
     About:          https://github.com/chiro2001/Wenku8ToEpub
@@ -645,7 +662,7 @@ logger = get_logger()
 
 if __name__ == '__main__':
     try:
-        _opts, _args = getopt.getopt(sys.argv[1:], '-h-t-b-i-os:p:', [])
+        _opts, _args = getopt.getopt(sys.argv[1:], '-h-t-b-i-r-os:p:', [])
     except getopt.GetoptError as e:
         logger.error(f'参数解析错误: {e}')
         sys.exit(1)
@@ -656,6 +673,7 @@ if __name__ == '__main__':
     _run_mode = 'download'
     _search_key: str = None
     _proxy: str = None
+    _raw_book_name: bool = False
     for name, val in _opts:
         if '-h' == name:
             print(help_str)
@@ -672,6 +690,8 @@ if __name__ == '__main__':
         if '-p' == name:
             _proxy = val
             logger.warning(f'using proxy: {_proxy}')
+        if '-r' == name:
+            _raw_book_name = True
     if _run_mode == 'search':
         wk = Wenku8ToEpub(proxy=_proxy)
         _books = wk.search(_search_key)
@@ -690,7 +710,7 @@ if __name__ == '__main__':
             print(help_str)
             sys.exit()
         for _id in _args:
-            wk = Wenku8ToEpub(logger=logger, proxy=_proxy)
+            wk = Wenku8ToEpub(logger=logger, proxy=_proxy, raw_book_name=_raw_book_name)
             _book_info = wk.book_info(_id)
             # fix issue #6: UnicodeEncodeError: 'gbk' codec can't encode character
             # (But I didn't reproduce the bug.)
