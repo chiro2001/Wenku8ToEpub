@@ -525,6 +525,7 @@ class Wenku8ToEpub:
         self.logger.info('标题: ' + title + " 作者: " + author)
         self.book.set_identifier("%s, %s" % (title, author))
         self.book.set_title(title)
+        self.book.set_language('zh')
         self.book.add_author(author)
         self.book.set_cover('cover.jpg', data_cover)
 
