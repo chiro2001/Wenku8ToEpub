@@ -1,5 +1,8 @@
+import time
+
 import requests
 import bs4
+import urllib3
 from bs4 import BeautifulSoup as Soup
 from ebooklib import epub
 import os
@@ -10,6 +13,7 @@ import threading
 import io
 import re
 import signal
+from ebooklib.plugins import ChapterSelector
 
 
 class Wenku8ToEpub:
@@ -305,7 +309,23 @@ class Wenku8ToEpub:
         return title
 
     def get_page(self, url_page: str, title: str = ''):
-        data = requests.get(url_page, headers={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy()).content
+        _res_code = -1
+        _res = None
+        while _res_code != 200:
+            try:
+                _res = requests.get(url_page, headers={'User-Agent': Wenku8ToEpub.USER_AGENT}, proxies=self.get_proxy(), timeout=30)
+            except requests.exceptions.Timeout:
+                time.sleep(5)
+                continue
+            except requests.exceptions.ConnectionError:
+                time.sleep(5)
+                continue
+            except urllib3.exceptions.ReadTimeoutError:
+                time.sleep(5)
+                continue
+            _res_code = _res.status_code
+
+        data = _res.content
         soup = Soup(data, 'html.parser')
         content = soup.select('#content')[0]
         # 去除ul属性
@@ -541,50 +561,70 @@ class Wenku8ToEpub:
 
         order = 0
         chapter_names = []
-        for tar in targets:
-            a = tar.select('a')
-            # 这是本卷的标题
-            text = tar.get_text()
-            # 排除空白表格
-            if text.encode() == b'\xc2\xa0':
-                # print('排除了', text, text.encode() == b'\xc2\xa0')
-                continue
-            if len(a) == 0:
-                volume_text = tar.get_text()
-                self.logger.info('volume: ' + volume_text)
+        time.sleep(2)  # 为了减少cloudflare错误逻辑，在这里暂停2秒
+        '''
+        在这里添加单章逻辑
+        书名也要改成标题 + 第x章
+        使用装饰器实现，不改变原先的逻辑
+        '''
+        @ChapterSelector.chapterselector(_chapter_select_mode, self.logger.info)
+        def getBooks(targets):
+            for tar in targets:
+                a = tar.select('a')
+                # 这是本卷的标题
+                text = tar.get_text()
+                # 排除空白表格
 
-                # 上一章节的chapter
-                for th in self.thread_pool:
-                    th.join()
-                # 已经全部结束
-                if len(self.thread_pool) != 0:
-                    self.thread_pool = []
-                    for chapter in self.chapters:
-                        if chapter is None:
-                            continue
-                        self.toc[-1][1].append(chapter)
-                        self.spine.append(chapter)
+                if len(self.thread_pool) >= 4:
+                    time.sleep(10)  # 当线程大于时休眠
+                    for thread in self.thread_pool:
+                        thread.join()  # 保证所有线程结束任务
+                    self.thread_pool.clear() # 清空即可
 
-                self.chapters = [None for _ in range(len(targets))]
-                order = 0
-                self.toc.append((epub.Section(volume_text), []))
-                self.lock.acquire()
-                volume = epub.EpubHtml(title=volume_text, file_name='%s.html' % self.sum_index)
-                self.sum_index = self.sum_index + 1
-                volume.set_content(("<h1>%s</h1><br>" % volume_text).encode())
-                self.book.add_item(volume)
-                self.lock.release()
-                continue
-            # 是单章
-            a = a[0]
 
-            th = threading.Thread(target=self.fetch_chapter, args=(a, order, fetch_image))
-            chapter_names.append(a.get_text())
-            order = order + 1
-            self.thread_pool.append(th)
-            th.setDaemon(True)
-            th.start()
+                if text.encode() == b'\xc2\xa0':
+                    # print('排除了', text, text.encode() == b'\xc2\xa0')
+                    continue
+                if len(a) == 0:
+                    volume_text = tar.get_text()
+                    self.logger.info('volume: ' + volume_text)
 
+                    # 上一章节的chapter
+                    for th in self.thread_pool:
+                        th.join()
+                    # 已经全部结束
+                    if len(self.thread_pool) != 0:
+                        self.thread_pool = []
+                        for chapter in self.chapters:
+                            if chapter is None:
+                                continue
+                            self.toc[-1][1].append(chapter)
+                            self.spine.append(chapter)
+
+                    self.chapters = [None for _ in range(len(targets))]
+                    order = 0
+                    self.toc.append((epub.Section(volume_text), []))
+                    self.lock.acquire()
+                    volume = epub.EpubHtml(title=volume_text, file_name='%s.html' % self.sum_index)
+                    self.sum_index = self.sum_index + 1
+                    volume.set_content(("<h1>%s</h1><br>" % volume_text).encode())
+                    self.book.add_item(volume)
+                    self.lock.release()
+                    continue
+                # 是单章
+                a = a[0]
+
+                """
+                在这里由于cloudflare防攻击配置，访问得过快会导致access deny, 所以这里要调整线程数量
+                """
+                th = threading.Thread(target=self.fetch_chapter, args=(a, order, fetch_image))
+                chapter_names.append(a.get_text())
+                order = order + 1
+                self.thread_pool.append(th)
+                th.setDaemon(True)
+                th.start()
+                time.sleep(0.5)
+        getBooks(targets)
         # 最后一个章节的chapter
         for th in self.thread_pool:
             th.join()
@@ -608,6 +648,12 @@ class Wenku8ToEpub:
             return s
 
         # noinspection PyStringFormat
+        @ChapterSelector.changeToChapterBookName(flag=_chapter_select_mode,
+                                                 title=title,
+                                                 author=author,
+                                                 remove_special_symbols=remove_special_symbols,
+                                                 index=index,
+                                                 raw_book_name=self.raw_book_name)
         def generate_filename(index_: int):
             return '%s - %s%s.epub' % (
                 *[remove_special_symbols(s) if not self.raw_book_name else s for s in [title, author]],
@@ -641,7 +687,7 @@ help_str = '''
 把 www.wenku8.net 的轻小说在线转换成epub格式。
 wenku8.net 没有版权的小说则下载 TXT 文件然后转换为 epub 文件。
 
-wk2epub [-h] [-t] [-m] [-b] [-s search_word] [-p proxy_url] [list]
+wk2epub [-h] [-t] [-m] [-b] [-c] [-s search_word] [-p proxy_url] [list]
 
     list            一个数字列表，表示 wenku8 的书的ID（从链接可以找到）。
                     中间用空格隔开。此项请放在最后。
@@ -653,7 +699,8 @@ wk2epub [-h] [-t] [-m] [-b] [-s search_word] [-p proxy_url] [list]
     -b              把生成的epub文件直接从标准输出返回。此时list长度应为1。
     -h              显示本帮助。
     -r              不剔除特殊符号而使用原书名作为文件名保存。
-
+    -c              指定下载的章节范围
+    
     Example:        wk2epub -t 2541
     About:          https://github.com/chiro2001/Wenku8ToEpub
     Version:        2021/12/03 10:53 AM
@@ -663,7 +710,7 @@ logger = get_logger()
 
 if __name__ == '__main__':
     try:
-        _opts, _args = getopt.getopt(sys.argv[1:], '-h-t-b-i-r-os:p:', [])
+        _opts, _args = getopt.getopt(sys.argv[1:], '-c-h-t-b-i-r-os:p:', [])
     except getopt.GetoptError as e:
         logger.error(f'参数解析错误: {e}')
         sys.exit(1)
@@ -675,6 +722,7 @@ if __name__ == '__main__':
     _search_key: str = None
     _proxy: str = None
     _raw_book_name: bool = False
+    _chapter_select_mode: bool = False
     for name, val in _opts:
         if '-h' == name:
             print(help_str)
@@ -693,6 +741,8 @@ if __name__ == '__main__':
             logger.warning(f'using proxy: {_proxy}')
         if '-r' == name:
             _raw_book_name = True
+        if '-c' == name:
+            _chapter_select_mode = True
     if _run_mode == 'search':
         wk = Wenku8ToEpub(proxy=_proxy)
         _books = wk.search(_search_key)
