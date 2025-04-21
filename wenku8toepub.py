@@ -599,7 +599,7 @@ class Wenku8ToEpub:
 
         self.save_book(title, author, **kwargs)
 
-    def save_book(self, title: str, author: str, bin_mode: bool = False, save_path: str = '', index: int = None):
+    def save_book(self, title: str, author: str, bin_mode: bool = False, save_path: str = 'out', index: int = None):
         # fix issue #8
         def remove_special_symbols(s: str, refill: str = '_') -> str:
             symbols = """"';:<>./\\+`~!@#$%^&*"""
@@ -653,6 +653,7 @@ wk2epub [-h] [-t] [-m] [-b] [-s search_word] [-p proxy_url] [list]
     -b              把生成的epub文件直接从标准输出返回。此时list长度应为1。
     -h              显示本帮助。
     -r              不剔除特殊符号而使用原书名作为文件名保存。
+    -o              保存路径，默认当前工作out/目录。
 
     Example:        wk2epub -t 2541
     About:          https://github.com/chiro2001/Wenku8ToEpub
@@ -663,7 +664,7 @@ logger = get_logger()
 
 if __name__ == '__main__':
     try:
-        _opts, _args = getopt.getopt(sys.argv[1:], '-h-t-b-i-r-os:p:', [])
+        _opts, _args = getopt.getopt(sys.argv[1:], '-h-t-b-i-ro:s:p:', [])
     except getopt.GetoptError as e:
         logger.error(f'参数解析错误: {e}')
         sys.exit(1)
@@ -675,6 +676,8 @@ if __name__ == '__main__':
     _search_key: str = None
     _proxy: str = None
     _raw_book_name: bool = False
+    _save_path = os.getcwd()  # 默认保存路径为当前工作目录
+
     for name, val in _opts:
         if '-h' == name:
             print(help_str)
@@ -693,6 +696,10 @@ if __name__ == '__main__':
             logger.warning(f'using proxy: {_proxy}')
         if '-r' == name:
             _raw_book_name = True
+        if '-o' == name:  # 添加 -o 参数用于指定保存路径
+            _save_path = val
+            logger.warning(f'EPUB 文件将保存到: {_save_path}')
+
     if _run_mode == 'search':
         wk = Wenku8ToEpub(proxy=_proxy)
         _books = wk.search(_search_key)
@@ -720,6 +727,6 @@ if __name__ == '__main__':
                 print('简介：\n%s' % _book_info['brief'])
             except Exception as e:
                 logger.error(f"error when reading info: {e.__class__.__name__} {e}")
-            res = wk.get_book(_id, fetch_image=_fetch_image, bin_mode=_bin_mode)
+            res = wk.get_book(_id, fetch_image=_fetch_image, bin_mode=_bin_mode, save_path=_save_path)
             if _bin_mode is True:
                 print(res)
