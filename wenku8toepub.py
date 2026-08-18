@@ -409,22 +409,30 @@ class Wenku8ToEpub:
         data_download.seek(0)
         txt = data_download.read().decode('gbk', errors='ignore')
         self.logger.info('TXT下载完成')
-        title = re.findall('<.+>', txt[:81])[0][1:-1]
-        txt = txt[40 + len(title):-76]
+        title_matches = re.findall('<.+>', txt[:81])
+        if title_matches:
+            title = title_matches[0][1:-1]
+            txt = txt[40 + len(title):-76]
+        else:
+            title = 'Unknown'
 
         volumes = []
         chapters = []
         for tar in targets:
-            if tar.get_attribute_list('class')[0] == 'vcss':
+            classes = tar.get_attribute_list('class')
+            if len(classes) == 0:
+                continue
+            if classes[0] == 'vcss':
                 volumes.append(tar.get_text())
                 chapters.append({
                     'volume': tar.get_text(),
                     'chapters': []
                 })
                 continue
-            if tar.get_attribute_list('class')[0] == 'ccss' \
+            if classes[0] == 'ccss' \
                     and tar.get_text().encode() != b'\xc2\xa0':
-                chapters[-1]['chapters'].append(tar.get_text())
+                if len(chapters) > 0:
+                    chapters[-1]['chapters'].append(tar.get_text())
                 continue
 
         last_end = 0
